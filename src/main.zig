@@ -3,8 +3,7 @@ const zigeidoscope = @import("zigeidoscope");
 
 pub fn main() !void {
     // Prints to stderr, ignoring potential errors.
-    std.debug.print("All your {s} are belong to us.\n", .{"codebase"});
-    try zigeidoscope.bufferedPrint();
+    const str = "extern sin(arg);extern cos(arg);extern atan2(arg1 arg2);atan2(sin(.4), cos(42))";
 }
 
 test "simple test" {

@@ -1,23 +1,91 @@
-//! By convention, root.zig is the root source file when making a library.
 const std = @import("std");
+const allocator = std.heap.smp_allocator;
+const Allocator = std.mem.Allocator;
 
-pub fn bufferedPrint() !void {
-    // Stdout is for the actual output of your application, for example if you
-    // are implementing gzip, then only the compressed bytes should be sent to
-    // stdout, not any debugging messages.
-    var stdout_buffer: [1024]u8 = undefined;
-    var stdout_writer = std.fs.File.stdout().writer(&stdout_buffer);
-    const stdout = &stdout_writer.interface;
+const TokenEnum = enum { EndOfFile, Def, Extern, Identifier, Number };
 
-    try stdout.print("Run `zig build test` to run the tests.\n", .{});
+const Token = union(TokenEnum) { Identifier: []const u8, Number: f64, EndOfFile, Def, Extern };
+const MAX_IDENTIFIER_LENGTH = std.math.maxInt(u8);
+const MAX_FLOAT_LENGTH: u8 = 14;
 
-    try stdout.flush(); // Don't forget to flush!
-}
+const LexerError = error{ TwoPointsInNumber, NumberTooLong };
+const GetTokensError = LexerError || Allocator.Error;
 
-pub fn add(a: i32, b: i32) i32 {
-    return a + b;
-}
+pub fn getTokens(text: []const u8) LexerError![]const Token {
+    var tokens: std.ArrayList(Token) = .empty;
 
-test "basic add functionality" {
-    try std.testing.expect(add(3, 7) == 10);
+    const identifier: [MAX_IDENTIFIER_LENGTH]u8 = undefined;
+    var identifier_index = 0;
+
+    const number: [MAX_FLOAT_LENGTH]u8 = undefined;
+    var number_index = 0;
+    var number_dot_present = false;
+
+    var comment_started = false;
+
+    for (text) |char| {
+        if (std.ascii.isWhitespace(char)) {
+            if (identifier_index != 0) {
+                tokens.append(allocator, Token{ .Identifier = try allocator.dupe(u8, identifier[0..identifier_index]) });
+                identifier_index = 0;
+                identifier.* = undefined;
+                continue;
+            }
+
+            if (number_index != 0) {
+                tokens.append(allocator, Token{ .Number = try allocator.dupe(u8, number[0..number_index]) });
+                number_index = 0;
+                number.* = undefined;
+                continue;
+            }
+        }
+
+        if (std.ascii.isAlphabetic(char) or identifier_index != 0) {
+            identifier[identifier_index] = char;
+            identifier_index += 1;
+
+            if (std.mem.eql(u8, identifier[0..identifier_index], "def")) {
+                tokens.append(allocator, TokenEnum.Def);
+                identifier.* = undefined;
+                identifier_index = 0;
+                continue;
+            }
+
+            if (std.mem.eql(u8, identifier[0..identifier_index], "extern")) {
+                tokens.append(allocator, TokenEnum.Extern);
+                identifier.* = undefined;
+                identifier_index = 0;
+                continue;
+            }
+
+            continue;
+        }
+
+        if (std.ascii.isDigit(char) or (char == '.') or number_index != 0) {
+            if (number_index > MAX_FLOAT_LENGTH) {
+                return LexerError.NumberTooLong;
+            }
+
+            if (char == '.' and !number_dot_present) {
+                number_dot_present = true;
+            } else {
+                return LexerError.TwoPointsInNumber;
+            }
+
+            number[number_index] = char;
+            number_index += 1;
+        }
+
+        if (comment_started or char == '#') {
+            if (char == '\n') {
+                comment_started = false;
+            } else {
+                comment_started = true;
+            }
+        }
+    }
+
+    tokens.append(allocator, TokenEnum.EndOfFile);
+
+    return tokens.toOwnedSlice(allocator);
 }
